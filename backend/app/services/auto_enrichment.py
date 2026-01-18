@@ -72,7 +72,6 @@ class AutoEnrichmentState:
 
 def get_total_missing_coupons() -> int:
     """Get count of products missing coupon data."""
-    init_db()
     query = """
         SELECT COUNT(*) as count
         FROM products

@@ -20,8 +20,6 @@ def get_statistics() -> dict[str, Any]:
     - Time-based statistics
     - Data quality metrics
     """
-    init_db()
-
     with get_connection() as conn:
         # Total products
         total_result = conn.execute("SELECT COUNT(*) as count FROM products").fetchone()
