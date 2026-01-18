@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crawler Status Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 28px;
+            color: #667eea;
+        }
+
+        .last-update {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .card h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #667eea;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .stat-box {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .stat-box:last-child {
+            margin-bottom: 0;
+        }
+
+        .stat-label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .crawl-item {
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        .crawl-item.running {
+            border-left-color: #28a745;
+            background: #e8f5e9;
+        }
+
+        .crawl-item.completed {
+            border-left-color: #007bff;
+            background: #e3f2fd;
+        }
+
+        .crawl-item.failed {
+            border-left-color: #dc3545;
+            background: #ffebee;
+        }
+
+        .crawl-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .crawl-name {
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-badge.running {
+            background: #28a745;
+            color: white;
+        }
+
+        .status-badge.completed {
+            background: #007bff;
+            color: white;
+        }
+
+        .status-badge.failed {
+            background: #dc3545;
+            color: white;
+        }
+
+        .status-badge.paused {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .status-badge.cancelled {
+            background: #6c757d;
+            color: white;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s ease;
+        }
+
+        .crawl-details {
+            font-size: 13px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .source-list {
+            list-style: none;
+        }
+
+        .source-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .source-item:last-child {
+            border-bottom: none;
+        }
+
+        .source-name {
+            font-weight: 500;
+        }
+
+        .source-count {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .error-text {
+            color: #dc3545;
+            font-size: 12px;
+            margin-top: 5px;
+            padding: 5px 8px;
+            background: #ffebee;
+            border-radius: 4px;
+        }
+
+        .crawl-actions {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn-pause {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .btn-resume {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-cancel {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn:disabled:hover {
+            transform: none;
+            box-shadow: none;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 30px;
+            color: #999;
+        }
+
+        .back-link {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+
+        .back-link:hover {
+            background: #764ba2;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .loading {
+            animation: pulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>Crawler Status Dashboard</h1>
+                <div class="last-update" id="lastUpdate">Loading...</div>
+            </div>
+            <a href="http://localhost:5173" class="back-link">← Back to Main App</a>
+        </header>
+
+        <div class="grid">
+            <!-- Statistics Card -->
+            <div class="card">
+                <h2>Statistics</h2>
+                <div id="statistics" class="loading">
+                    <div class="stat-box">
+                        <span class="stat-label">Loading...</span>
+                        <span class="stat-value">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Crawls Card -->
+            <div class="card">
+                <h2>Active Crawls</h2>
+                <div id="activeCrawls" class="loading">
+                    <div class="empty-state">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Products by Source Card -->
+        <div class="card">
+            <h2>Products by Source</h2>
+            <div id="productsBySource" class="loading">
+                <div class="empty-state">Loading...</div>
+            </div>
+        </div>
+
+        <!-- Recent Crawls Card -->
+        <div class="card">
+            <h2>Recent Crawls (Last 10)</h2>
+            <div id="recentCrawls" class="loading">
+                <div class="empty-state">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000/api/ingest/status/dashboard';
+        const REFRESH_INTERVAL = 3000; // 3 seconds
+
+        function formatNumber(num) {
+            return num.toLocaleString();
+        }
+
+        function formatDuration(started, ended) {
+            const startTime = new Date(started);
+            const endTime = ended ? new Date(ended) : new Date();
+            const seconds = Math.floor((endTime - startTime) / 1000);
+
+            if (seconds < 60) return `${seconds}s`;
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+            return `${(seconds / 3600).toFixed(1)}h`;
+        }
+
+        function renderStatistics(stats) {
+            const container = document.getElementById('statistics');
+            container.innerHTML = `
+                <div class="stat-box">
+                    <span class="stat-label">Total Products</span>
+                    <span class="stat-value">${formatNumber(stats.total_products)}</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Recent Imports (24h)</span>
+                    <span class="stat-value">${formatNumber(stats.recent_imports_24h)}</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Active Errors</span>
+                    <span class="stat-value" style="color: ${stats.active_errors > 0 ? '#dc3545' : '#28a745'}">
+                        ${formatNumber(stats.active_errors)}
+                    </span>
+                </div>
+            `;
+            container.classList.remove('loading');
+        }
+
+        function renderActiveCrawls(crawls) {
+            const container = document.getElementById('activeCrawls');
+
+            if (!crawls || crawls.length === 0) {
+                container.innerHTML = '<div class="empty-state">No active crawls</div>';
+                container.classList.remove('loading');
+                return;
+            }
+
+            container.innerHTML = crawls.map(crawl => {
+                const progress = crawl.total > 0 ? (crawl.completed / crawl.total * 100) : 0;
+                const duration = formatDuration(crawl.started_at, crawl.ended_at);
+                const canPause = crawl.status === 'running';
+                const canResume = crawl.status === 'paused';
+                const canCancel = crawl.status === 'running' || crawl.status === 'paused';
+
+                return `
+                    <div class="crawl-item ${crawl.status}">
+                        <div class="crawl-header">
+                            <span class="crawl-name">${crawl.name}</span>
+                            <span class="status-badge ${crawl.status}">${crawl.status}</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${progress}%"></div>
+                        </div>
+                        <div class="crawl-details">
+                            Progress: ${formatNumber(crawl.completed)} / ${formatNumber(crawl.total)}
+                            (${progress.toFixed(1)}%)
+                            ${crawl.errors_count > 0 ? ` | Errors: ${crawl.errors_count}` : ''}
+                            | Duration: ${duration}
+                        </div>
+                        ${crawl.last_error ? `<div class="error-text">Last error: ${crawl.last_error.substring(0, 100)}...</div>` : ''}
+                        <div class="crawl-actions">
+                            <button class="btn btn-pause" onclick="pauseCrawl('${crawl.id}')" ${!canPause ? 'disabled' : ''}>
+                                ⏸ Pause
+                            </button>
+                            <button class="btn btn-resume" onclick="resumeCrawl('${crawl.id}')" ${!canResume ? 'disabled' : ''}>
+                                ▶ Resume
+                            </button>
+                            <button class="btn btn-cancel" onclick="cancelCrawl('${crawl.id}')" ${!canCancel ? 'disabled' : ''}>
+                                ✕ Cancel
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            container.classList.remove('loading');
+        }
+
+        function renderProductsBySource(sources) {
+            const container = document.getElementById('productsBySource');
+
+            if (!sources || sources.length === 0) {
+                container.innerHTML = '<div class="empty-state">No products yet</div>';
+                container.classList.remove('loading');
+                return;
+            }
+
+            const total = sources.reduce((sum, s) => sum + s.count, 0);
+
+            container.innerHTML = `
+                <ul class="source-list">
+                    ${sources.map(source => `
+                        <li class="source-item">
+                            <span class="source-name">${source.source}</span>
+                            <span class="source-count">${formatNumber(source.count)} (${(source.count / total * 100).toFixed(1)}%)</span>
+                        </li>
+                    `).join('')}
+                    <li class="source-item" style="font-weight: bold; background: #f0f0f0;">
+                        <span class="source-name">TOTAL</span>
+                        <span class="source-count">${formatNumber(total)}</span>
+                    </li>
+                </ul>
+            `;
+            container.classList.remove('loading');
+        }
+
+        function renderRecentCrawls(crawls) {
+            const container = document.getElementById('recentCrawls');
+
+            if (!crawls || crawls.length === 0) {
+                container.innerHTML = '<div class="empty-state">No recent crawls</div>';
+                container.classList.remove('loading');
+                return;
+            }
+
+            container.innerHTML = crawls.map(crawl => {
+                const progress = crawl.total > 0 ? (crawl.completed / crawl.total * 100) : 0;
+                const duration = formatDuration(crawl.started_at, crawl.ended_at);
+
+                return `
+                    <div class="crawl-item ${crawl.status}">
+                        <div class="crawl-header">
+                            <span class="crawl-name">${crawl.name}</span>
+                            <span class="status-badge ${crawl.status}">${crawl.status}</span>
+                        </div>
+                        <div class="crawl-details">
+                            ${crawl.status === 'running' ? `
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width: ${progress}%"></div>
+                                </div>
+                                Progress: ${formatNumber(crawl.completed)} / ${formatNumber(crawl.total)} (${progress.toFixed(1)}%)
+                            ` : `
+                                Completed: ${formatNumber(crawl.completed)} / ${formatNumber(crawl.total)}
+                            `}
+                            ${crawl.errors_count > 0 ? ` | Errors: ${crawl.errors_count}` : ''}
+                            | Duration: ${duration}
+                            | Started: ${new Date(crawl.started_at).toLocaleString()}
+                        </div>
+                        ${crawl.last_error ? `<div class="error-text">Last error: ${crawl.last_error.substring(0, 100)}...</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+            container.classList.remove('loading');
+        }
+
+        async function pauseCrawl(runId) {
+            try {
+                const response = await fetch(`http://localhost:8000/api/ingest/crawl/${runId}/pause`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    console.log('Crawl paused:', runId);
+                    fetchAndRender(); // Refresh immediately
+                } else {
+                    alert('Failed to pause: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Failed to pause crawl:', error);
+                alert('Failed to pause crawl: ' + error.message);
+            }
+        }
+
+        async function resumeCrawl(runId) {
+            try {
+                const response = await fetch(`http://localhost:8000/api/ingest/crawl/${runId}/resume`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    console.log('Crawl resumed:', runId);
+                    fetchAndRender(); // Refresh immediately
+                } else {
+                    alert('Failed to resume: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Failed to resume crawl:', error);
+                alert('Failed to resume crawl: ' + error.message);
+            }
+        }
+
+        async function cancelCrawl(runId) {
+            if (!confirm('Are you sure you want to cancel this crawl? This cannot be undone.')) {
+                return;
+            }
+            try {
+                const response = await fetch(`http://localhost:8000/api/ingest/crawl/${runId}/cancel`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    console.log('Crawl cancelled:', runId);
+                    fetchAndRender(); // Refresh immediately
+                } else {
+                    alert('Failed to cancel: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Failed to cancel crawl:', error);
+                alert('Failed to cancel crawl: ' + error.message);
+            }
+        }
+
+        async function fetchAndRender() {
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json();
+
+                // Update last update time
+                document.getElementById('lastUpdate').textContent =
+                    `Last updated: ${new Date(data.timestamp).toLocaleTimeString()}`;
+
+                // Render all sections
+                renderStatistics(data.statistics);
+                renderActiveCrawls(data.active_crawls);
+                renderProductsBySource(data.statistics.products_by_source);
+                renderRecentCrawls(data.recent_crawls);
+
+            } catch (error) {
+                console.error('Failed to fetch dashboard data:', error);
+                document.getElementById('lastUpdate').textContent =
+                    `Error: ${error.message}`;
+            }
+        }
+
+        // Initial fetch
+        fetchAndRender();
+
+        // Auto-refresh every 3 seconds
+        setInterval(fetchAndRender, REFRESH_INTERVAL);
+    </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# Structured Products Analysis - macOS Application Launcher
+# This script is the executable for the .app bundle
+
+# Get the application bundle path
+APP_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+cd "$APP_DIR"
+
+# Open Terminal and run the start script
+osascript <<EOF
+tell application "Terminal"
+    activate
+    set currentTab to do script "cd '$APP_DIR' && bash start.sh"
+
+    -- Set window title
+    tell currentTab
+        set custom title to "Structured Products Analysis"
+    end tell
+end tell
+EOF

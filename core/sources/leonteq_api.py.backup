@@ -1,0 +1,302 @@
+from __future__ import annotations
+
+import time
+from typing import Optional, Callable
+
+import httpx
+
+from core.models import NormalizedProduct, make_field, Underlying
+from core.utils.text import truncate_excerpt
+
+BASE_URL = "https://structuredproducts-ch.leonteq.com"
+API_ENDPOINT = f"{BASE_URL}/rfb-api/products"
+
+
+def _build_request_payload(offset: int, page_size: int, filters: dict | None = None) -> dict:
+    """Build the POST request body for /rfb-api/products endpoint."""
+    payload = {
+        "region": "CH",
+        "pagination": {
+            "resultPerPage": page_size,
+            "resultsOffset": offset
+        },
+        "sort": [
+            {"fieldName": "underlying.shortName.keyword", "sortOrder": "ASC"},
+            {"fieldName": "payoff.bearish", "sortOrder": "ASC"},
+            {"fieldName": "calendar.finalFixingDate", "sortOrder": "ASC"},
+            {"fieldName": "levels.strikeLevelAbs", "sortOrder": "DESC"},
+            {"fieldName": "listings.markets.marketVenue", "sortOrder": "ASC"},
+            {"fieldName": "price.metrics.delta", "sortOrder": "DESC"}
+        ],
+        "conditions": {
+            "-identification.status:EXPIRED": True,
+            "+_exists_:levels.stopLossLevelAbs": False,
+            "+priceIndication.extendedTradingHours:true": False,
+            "+calendar.issueDateTime:[* TO now]": True
+        },
+        "currencies": [],
+        "underlyings": [],
+        "productTypes": [],
+        "omni": ""
+    }
+
+    if filters:
+        payload.update(filters)
+
+    return payload
+
+
+def fetch_products_page(
+    token: str,
+    offset: int = 0,
+    page_size: int = 50,
+    filters: dict | None = None
+) -> dict:
+    """
+    Fetch a single page from Leonteq /rfb-api/products endpoint.
+
+    Args:
+        token: JWT Bearer token for authentication
+        offset: Pagination offset (resultsOffset)
+        page_size: Results per page (resultPerPage, max 50)
+        filters: Optional filter overrides for conditions/currencies/etc
+
+    Returns:
+        Raw API response dict with 'products' and 'searchMetadata'
+
+    Raises:
+        ValueError: If token is not provided
+        RuntimeError: For various API errors (invalid token, forbidden, rate limited, timeout)
+        httpx.HTTPStatusError: For other HTTP errors
+    """
+    if not token:
+        raise ValueError("leonteq_api_token not configured")
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    payload = _build_request_payload(offset, page_size, filters)
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(API_ENDPOINT, headers=headers, json=payload)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise RuntimeError("leonteq_api_token_invalid") from e
+        elif e.response.status_code == 403:
+            raise RuntimeError("leonteq_api_forbidden") from e
+        elif e.response.status_code == 429:
+            raise RuntimeError("leonteq_api_rate_limited") from e
+        else:
+            raise RuntimeError(f"leonteq_api_error_{e.response.status_code}") from e
+    except httpx.TimeoutException as e:
+        raise RuntimeError("leonteq_api_timeout") from e
+    except httpx.ConnectError as e:
+        raise RuntimeError("leonteq_api_connection_failed") from e
+
+
+def fetch_all_products(
+    token: str,
+    page_size: int = 50,
+    max_products: int | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
+    rate_limit_ms: int = 100
+) -> list[dict]:
+    """
+    Fetch ALL products by paginating through the API.
+
+    Args:
+        token: JWT Bearer token for authentication
+        page_size: Results per page (default 50, max 50 per API spec)
+        max_products: Optional limit for testing (None = fetch all)
+        progress_callback: Optional callback(completed, total) for progress tracking
+        rate_limit_ms: Delay between requests in milliseconds
+
+    Returns:
+        List of all product dicts from API
+    """
+    products = []
+    offset = 0
+    total_hits = None
+
+    while True:
+        # Fetch page
+        response = fetch_products_page(token, offset, page_size)
+        page_products = response.get("products", [])
+        metadata = response.get("searchMetadata", {})
+
+        # First page: capture total
+        if total_hits is None:
+            total_hits = metadata.get("totalHits", 0)
+            if progress_callback:
+                progress_callback(0, total_hits)
+
+        # Add products
+        products.extend(page_products)
+
+        # Progress update
+        if progress_callback:
+            progress_callback(len(products), total_hits)
+
+        # Check termination conditions
+        if not page_products:  # No more results
+            break
+        if max_products and len(products) >= max_products:  # Testing limit
+            products = products[:max_products]
+            break
+        if len(products) >= total_hits:  # Fetched all
+            break
+
+        # Next page
+        offset += page_size
+
+        # Rate limiting
+        if rate_limit_ms > 0:
+            time.sleep(rate_limit_ms / 1000.0)
+
+    return products
+
+
+def parse_api_product(api_product: dict) -> NormalizedProduct:
+    """
+    Map Leonteq API JSON structure to NormalizedProduct.
+
+    Args:
+        api_product: Single product object from API response
+
+    Returns:
+        NormalizedProduct with fields mapped from API response
+
+    Raises:
+        ValueError: If ISIN is missing (required for deduplication)
+
+    Field mapping strategy:
+        - High confidence (0.9): Direct mappings like identifiers.isin
+        - Medium confidence (0.7-0.8): Nested fields like levels.strikeLevelAbs
+        - Lower confidence (0.6): Derived/calculated fields
+
+    Source: "leonteq_api"
+    """
+    product = NormalizedProduct()
+    source = "leonteq_api"
+
+    # ISIN (required field)
+    identifiers = api_product.get("identifiers", {})
+    isin = identifiers.get("isin")
+    if not isin:
+        raise ValueError(f"Product missing ISIN: {identifiers}")
+    product.isin = make_field(isin, 0.9, source, truncate_excerpt(f"identifiers.isin: {isin}"))
+
+    # Valor
+    valor = identifiers.get("valor")
+    if valor:
+        product.valor_number = make_field(str(valor), 0.9, source, truncate_excerpt(f"identifiers.valor: {valor}"))
+
+    # Symbol/Ticker
+    symbol = identifiers.get("symbol")
+    if symbol:
+        product.ticker_six = make_field(symbol, 0.8, source)
+
+    # Underlying information
+    underlying_data = api_product.get("underlying", {})
+    if underlying_data.get("shortName"):
+        product.product_name = make_field(underlying_data["shortName"], 0.8, source)
+
+    # Product type
+    product_type_data = api_product.get("productType", {})
+    if product_type_data.get("name"):
+        product.product_type = make_field(product_type_data["name"], 0.8, source)
+
+    # Issuer
+    issuer_data = api_product.get("issuer", {})
+    if issuer_data.get("name"):
+        product.issuer_name = make_field(issuer_data["name"], 0.8, source)
+
+    # Currency
+    currency = api_product.get("currency")
+    if currency:
+        product.currency = make_field(currency, 0.9, source)
+
+    # Dates - Calendar
+    calendar = api_product.get("calendar", {})
+
+    # Maturity date
+    maturity = calendar.get("finalFixingDate")
+    if maturity:
+        product.maturity_date = make_field(maturity, 0.9, source)
+
+    # Issue date
+    issue_date = calendar.get("issueDateTime")
+    if issue_date:
+        product.settlement_date = make_field(issue_date, 0.8, source)
+
+    # Initial fixing date
+    initial_fixing = calendar.get("initialFixingDate")
+    if initial_fixing:
+        product.initial_fixing_date = make_field(initial_fixing, 0.8, source)
+
+    # Subscription dates
+    subscription_start = calendar.get("subscriptionStartDate")
+    if subscription_start:
+        product.subscription_start_date = make_field(subscription_start, 0.8, source)
+
+    subscription_end = calendar.get("subscriptionEndDate")
+    if subscription_end:
+        product.subscription_end_date = make_field(subscription_end, 0.8, source)
+
+    # Listing venues
+    listings = api_product.get("listings", {})
+    markets = listings.get("markets", [])
+    if markets and isinstance(markets, list):
+        venues = [m.get("marketVenue") for m in markets if m.get("marketVenue")]
+        if venues:
+            product.listing_venue = make_field(", ".join(venues), 0.7, source)
+
+    # Levels (strike, barrier, etc.)
+    levels = api_product.get("levels", {})
+
+    # Create underlying with strike/barrier levels
+    underlying_obj = Underlying()
+
+    strike = levels.get("strikeLevelAbs")
+    if strike is not None:
+        underlying_obj.strike_level = make_field(float(strike), 0.7, source)
+
+    barrier = levels.get("barrierLevelAbs")
+    if barrier is not None:
+        underlying_obj.barrier_level = make_field(float(barrier), 0.7, source)
+
+    # Set underlying name if available
+    if underlying_data.get("shortName"):
+        underlying_obj.name = make_field(underlying_data["shortName"], 0.8, source)
+
+    # Add underlying to product if it has meaningful data
+    if underlying_obj.name or underlying_obj.strike_level or underlying_obj.barrier_level:
+        product.underlyings = [underlying_obj]
+
+    # Coupon information
+    coupon_data = api_product.get("coupon", {})
+    coupon_rate = coupon_data.get("rate")
+    if coupon_rate is not None:
+        product.coupon_rate_pct_pa = make_field(float(coupon_rate), 0.8, source)
+
+    coupon_frequency = coupon_data.get("frequency")
+    if coupon_frequency:
+        product.coupon_frequency = make_field(coupon_frequency, 0.8, source)
+
+    # Settlement type
+    settlement_data = api_product.get("settlement", {})
+    settlement_type = settlement_data.get("type")
+    if settlement_type:
+        product.settlement_type = make_field(settlement_type, 0.7, source)
+
+    # Status (for informational purposes)
+    identification = api_product.get("identification", {})
+    status = identification.get("status")
+    # Note: Status is not stored in NormalizedProduct, but used for filtering during crawl
+
+    return product
