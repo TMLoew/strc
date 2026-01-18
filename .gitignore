@@ -1,79 +1,271 @@
-# macOS
-.DS_Store
+# ============================================================================
+# SENSITIVE DATA - Never commit these files
+# ============================================================================
 
-# Environment variables and secrets
+# Environment variables and API keys
 .env
 .env.*
+!.env.example
 *.pem
 *.key
+*.p12
+*.pfx
 credentials.json
 secrets.json
+config.secret.*
 
-# Python
+# Session and authentication data
+storage_state.json
+*_storage_state.json
+*_session.json
+cookies.json
+auth_token*
+session_*.json
+.session/
+
+# User-specific credentials
+*_credentials.json
+api_keys.json
+tokens.json
+
+# ============================================================================
+# DATABASES AND RUNTIME STATE - Contains product data and progress
+# ============================================================================
+
+# SQLite databases (contains 34K+ products with financial data)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+data/*.db
+frontend/data/*.db
+backend/data/*.db
+
+# Runtime state files (enrichment progress tracking)
+data/*_state.json
+data/leonteq_enrich_state.json
+data/auto_enrich_state.json
+*_checkpoint.json
+progress_*.json
+
+# ============================================================================
+# CACHE AND TEMPORARY FILES
+# ============================================================================
+
+# Application cache
+data/cache/
+data/temp/
+.cache/
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Download cache
+data/downloads/
+downloads/
+*.download
+
+# Browser automation cache
+.playwright/
+playwright/.local-browsers/
+
+# ============================================================================
+# GENERATED FILES AND EXPORTS
+# ============================================================================
+
+# Parsed data and exports
+output/
+output/logs/
+output/exports/
+output/parsed/
+data/exports/
+data/parsed/
+exports/
+parsed/
+
+# Generated reports
+reports/
+*.report.json
+*.report.html
+
+# Screenshots and PDFs (from browser automation)
+screenshots/
+*.screenshot.png
+data/pdfs/
+termsheets/
+
+# ============================================================================
+# LOGS AND MONITORING
+# ============================================================================
+
+# All log files
+*.log
+logs/
+*.log.*
+log/
+
+# Specific log types
+error.log
+access.log
+debug.log
+enrichment.log
+crawler.log
+
+# ============================================================================
+# PYTHON
+# ============================================================================
+
+# Byte-compiled / optimized
 __pycache__/
+*.py[cod]
+*$py.class
 *.pyc
 *.pyo
 *.pyd
+
+# Testing
 .pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Type checking
 .mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Virtual environments
 .venv/
 venv/
+env/
+ENV/
 .python-version
-*.egg-info/
 
-# Node
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+
+# ============================================================================
+# NODE / JAVASCRIPT
+# ============================================================================
+
+# Dependencies
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+jspm_packages/
 
 # Build outputs
 dist/
 build/
 frontend/dist/
 frontend/build/
-*.whl
 
 # Logs
-output/logs/
-*.log
-logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
 
-# Databases (IMPORTANT: Contains sensitive product data)
-*.db
-*.sqlite
-*.sqlite3
-data/*.db
-frontend/data/*.db
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
 
-# Cache and temporary files
-data/cache/
-data/temp/
-data/*_state.json
-data/leonteq_enrich_state.json
-data/auto_enrich_state.json
-*.tmp
-*.temp
-.cache/
+# ============================================================================
+# IDE AND EDITOR
+# ============================================================================
 
-# Playwright browser automation
-.playwright/
-storage_state.json
-*_storage_state.json
-
-# Exports and parsed data
-output/exports/
-output/parsed/
-data/exports/
-data/parsed/
-
-# IDE
+# VSCode
 .vscode/
+*.code-workspace
+
+# JetBrains (PyCharm, WebStorm, etc.)
 .idea/
+*.iml
+*.ipr
+*.iws
+
+# Vim
 *.swp
 *.swo
 *~
 
-# OS
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================================================
+# OPERATING SYSTEM
+# ============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
 Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
 Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+.Trash-*/
+
+# ============================================================================
+# PROJECT SPECIFIC
+# ============================================================================
+
+# Backup files
+*.backup
+*.bak
+*.old
+*~
+
+# Test data
+test_data/
+sample_data/
+fixtures/*.db
+
+# Documentation builds
+docs/_build/
+docs/.doctrees/
+site/
+
+# Coverage reports
+.coverage
+coverage.xml
+*.cover
+
+# ============================================================================
+# EXCEPTIONS - These files SHOULD be committed
+# ============================================================================
+
+# Example/template files (but keep examples)
+!.env.example
+!credentials.example.json
+!config.example.json
+
+# Git keep files for empty directories
+!.gitkeep
