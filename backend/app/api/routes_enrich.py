@@ -16,8 +16,9 @@ from backend.app.services.leonteq_pdf_enrichment import (
 from backend.app.services.finanzen_crawler_service import enrich_products_from_finanzen_batch
 from backend.app.services.auto_enrichment import (
     AutoEnrichmentState,
-    run_auto_enrichment_cycle,
+    get_enrichment_stats,
     get_total_missing_coupons,
+    run_auto_enrichment_cycle,
 )
 
 router = APIRouter(prefix="/enrich", tags=["enrich"])
@@ -198,31 +199,45 @@ async def stop_auto_enrichment() -> dict[str, Any]:
 
 @router.get("/auto/status")
 async def get_auto_enrichment_status() -> dict[str, Any]:
-    """Get current auto-enrichment status."""
+    """
+    Get current auto-enrichment status.
+
+    Returns comprehensive statistics including:
+    - running: Whether auto-enrichment is currently running
+    - enrichment_stats: Detailed breakdown of data completeness
+    - process_stats: Statistics about the enrichment process
+    """
     global auto_enrich_state
 
     # Reload state to get latest
     auto_enrich_state.load()
 
-    # Get total missing in separate DB executor to avoid blocking
+    # Get comprehensive enrichment stats in separate DB executor to avoid blocking
     loop = asyncio.get_event_loop()
-    total_missing = await loop.run_in_executor(db_executor, get_total_missing_coupons)
+    enrich_stats = await loop.run_in_executor(db_executor, get_enrichment_stats)
 
+    # Calculate progress percentage based on fully enriched products
     progress_pct = 0
-    if total_missing > 0:
-        # Calculate rough progress (offset / total)
-        total_products = total_missing + auto_enrich_state.finanzen_offset
-        if total_products > 0:
-            progress_pct = min(100, int((auto_enrich_state.finanzen_offset / total_products) * 100))
+    if enrich_stats["total_products"] > 0:
+        progress_pct = min(100, int((enrich_stats["fully_enriched"] / enrich_stats["total_products"]) * 100))
 
     return {
         "running": auto_enrich_running,
-        "finanzen_offset": auto_enrich_state.finanzen_offset,
-        "total_enriched": auto_enrich_state.total_enriched,
-        "total_failed": auto_enrich_state.total_failed,
-        "total_missing": total_missing,
-        "progress_pct": progress_pct,
-        "last_run": auto_enrich_state.last_run,
+        "enrichment_stats": {
+            "total_products": enrich_stats["total_products"],
+            "fully_enriched": enrich_stats["fully_enriched"],
+            "incomplete": enrich_stats["incomplete"],
+            "missing_coupon": enrich_stats["missing_coupon"],
+            "missing_underlyings": enrich_stats["missing_underlyings"],
+            "missing_barrier": enrich_stats["missing_barrier"],
+            "completion_pct": progress_pct
+        },
+        "process_stats": {
+            "finanzen_offset": auto_enrich_state.finanzen_offset,
+            "attempts_successful": auto_enrich_state.total_enriched,
+            "attempts_failed": auto_enrich_state.total_failed,
+            "last_run": auto_enrich_state.last_run,
+        }
     }
 
 
@@ -269,3 +284,39 @@ async def reset_leonteq_position() -> dict[str, Any]:
         "status": "reset",
         "message": "Leonteq enrichment will start from the beginning on next run",
     }
+
+
+@router.get("/progress-by-source")
+async def get_enrichment_progress_by_source() -> dict[str, Any]:
+    """Get enrichment progress broken down by source."""
+    from backend.app.db.session import get_connection
+
+    def get_source_progress():
+        with get_connection() as conn:
+            # Get progress by source
+            rows = conn.execute("""
+                SELECT
+                    source_kind,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN json_extract(normalized_json, '$.coupon_rate_pct_pa.value') IS NOT NULL THEN 1 ELSE 0 END) as has_coupon,
+                    SUM(CASE WHEN json_extract(normalized_json, '$.coupon_rate_pct_pa.value') IS NULL AND isin IS NOT NULL THEN 1 ELSE 0 END) as missing_coupon
+                FROM products
+                GROUP BY source_kind
+                ORDER BY total DESC
+            """).fetchall()
+
+            return [
+                {
+                    "source": row["source_kind"],
+                    "total": row["total"],
+                    "has_coupon": row["has_coupon"],
+                    "missing_coupon": row["missing_coupon"],
+                    "completion_pct": round((row["has_coupon"] / row["total"]) * 100, 1) if row["total"] > 0 else 0
+                }
+                for row in rows
+            ]
+
+    loop = asyncio.get_event_loop()
+    source_progress = await loop.run_in_executor(db_executor, get_source_progress)
+
+    return {"sources": source_progress}

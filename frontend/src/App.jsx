@@ -59,6 +59,9 @@ function App() {
   const [sourceOptions, setSourceOptions] = useState([])
   const [productTypeOptions, setProductTypeOptions] = useState([])
   const [serverTotal, setServerTotal] = useState(0)
+  const [sourceProgress, setSourceProgress] = useState(null)
+  const [searchResults, setSearchResults] = useState(null)
+  const [isSearching, setIsSearching] = useState(false)
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
@@ -134,9 +137,11 @@ function App() {
   // Poll auto-enrichment status every 5 seconds
   useEffect(() => {
     fetchAutoEnrichStatus() // Initial fetch
+    fetchSourceProgress() // Initial fetch
 
     const interval = setInterval(() => {
       fetchAutoEnrichStatus()
+      fetchSourceProgress()
     }, 5000) // Poll every 5 seconds
 
     return () => clearInterval(interval)
@@ -339,14 +344,53 @@ function App() {
   const searchProducts = async (event) => {
     event.preventDefault()
     if (!query.trim()) return
-    await fetch(`${API_BASE}/products/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query })
-    })
+
+    const searchQuery = query.trim().toUpperCase()
+    setIsSearching(true)
+    setStatus('Searching...')
+    setSearchResults(null)
+
+    try {
+      // Check if it looks like an ISIN (2 letters + 10 alphanumeric)
+      const isIsin = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(searchQuery)
+
+      if (isIsin) {
+        // Use the new ISIN search endpoint
+        const res = await fetch(`${API_BASE}/products/search/isin/${searchQuery}`)
+        if (!res.ok) {
+          throw new Error(`Search failed: ${res.statusText}`)
+        }
+        const data = await res.json()
+
+        if (data.count === 0) {
+          setStatus(`No products found with ISIN ${searchQuery}`)
+          setSearchResults({ products: [], count: 0, isin: searchQuery })
+        } else {
+          setStatus(`Found ${data.count} product(s) with ISIN ${searchQuery}`)
+          setSearchResults(data)
+        }
+      } else {
+        // Fall back to the original search (for Valor, Symbol, etc.)
+        await fetch(`${API_BASE}/products/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: searchQuery })
+        })
+        setQuery('')
+        await loadProducts()
+        setStatus('Search completed for Leonteq + Swissquote')
+      }
+    } catch (err) {
+      setStatus(`Search failed: ${err.message}`)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  const clearSearch = () => {
+    setSearchResults(null)
     setQuery('')
-    await loadProducts()
-    setStatus('Search completed for Leonteq + Swissquote')
+    setStatus('')
   }
 
   const runCrawl = async () => {
@@ -635,11 +679,29 @@ function App() {
   const fetchAutoEnrichStatus = async () => {
     try {
       const res = await fetch(`${API_BASE}/enrich/auto/status`)
+      if (!res.ok) {
+        console.error(`Auto-enrich status endpoint returned ${res.status}`)
+        return
+      }
       const data = await res.json()
       setAutoEnrichStatus(data)
       setAutoEnrichRunning(data.running)
     } catch (err) {
       console.error('Failed to fetch auto-enrich status:', err)
+    }
+  }
+
+  const fetchSourceProgress = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/enrich/progress-by-source`)
+      if (!res.ok) {
+        console.error(`Source progress endpoint returned ${res.status}`)
+        return
+      }
+      const data = await res.json()
+      setSourceProgress(data.sources)
+    } catch (err) {
+      console.error('Failed to fetch source progress:', err)
     }
   }
 
@@ -958,17 +1020,26 @@ function App() {
             >
               Settings
             </button>
+            <button
+              className={mainTab === 'monitoring' ? 'main-tab active' : 'main-tab'}
+              onClick={() => setMainTab('monitoring')}
+            >
+              Monitoring
+            </button>
           </div>
         </div>
         <form className="isin-form" onSubmit={searchProducts}>
-          <label>Search Products</label>
+          <label>Search Products by ISIN</label>
           <div className="isin-row">
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="ISIN, Valor, or Symbol (e.g., CH1505582432, 123456)"
+              placeholder="Enter ISIN (e.g., CH1505582432)"
+              disabled={isSearching}
             />
-            <button type="submit">Search</button>
+            <button type="submit" disabled={isSearching}>
+              {isSearching ? 'Searching...' : 'Search'}
+            </button>
           </div>
           {status && <p className="status">{status}</p>}
         </form>
@@ -1206,6 +1277,208 @@ function App() {
 
       {mainTab === 'statistics' ? (
         <Statistics />
+      ) : mainTab === 'monitoring' ? (
+        <div className="monitoring-page">
+          <div className="panel" style={{maxWidth: '1200px', margin: '0 auto'}}>
+            <div className="panel-header">
+              <h2>📊 Real-Time Monitoring</h2>
+              <span>Track enrichment progress and system status</span>
+            </div>
+
+            {/* Auto-Enrichment Status */}
+            <div className="monitoring-section" style={{marginBottom: '30px', padding: '20px', border: '2px solid #3498db', borderRadius: '8px', backgroundColor: '#f0f8ff'}}>
+              <h3 style={{marginBottom: '15px', color: '#3498db', display: 'flex', alignItems: 'center', gap: '10px'}}>
+                {autoEnrichRunning ? '🟢' : '⚪'} Auto-Enrichment Status
+              </h3>
+
+              {autoEnrichStatus ? (
+                <div>
+                  <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px', marginBottom: '20px'}}>
+                    <div style={{padding: '15px', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #ddd'}}>
+                      <div style={{fontSize: '12px', color: '#666', marginBottom: '5px'}}>STATUS</div>
+                      <div style={{fontSize: '20px', fontWeight: 'bold', color: autoEnrichRunning ? '#27ae60' : '#95a5a6'}}>
+                        {autoEnrichRunning ? 'Running' : 'Stopped'}
+                      </div>
+                    </div>
+                    <div style={{padding: '15px', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #ddd'}}>
+                      <div style={{fontSize: '12px', color: '#666', marginBottom: '5px'}}>PROGRESS</div>
+                      <div style={{fontSize: '20px', fontWeight: 'bold', color: '#3498db'}}>
+                        {autoEnrichStatus.progress_pct}%
+                      </div>
+                    </div>
+                    <div style={{padding: '15px', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #ddd'}}>
+                      <div style={{fontSize: '12px', color: '#666', marginBottom: '5px'}}>ENRICHED</div>
+                      <div style={{fontSize: '20px', fontWeight: 'bold', color: '#27ae60'}}>
+                        {autoEnrichStatus.total_enriched}
+                      </div>
+                    </div>
+                    <div style={{padding: '15px', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #ddd'}}>
+                      <div style={{fontSize: '12px', color: '#666', marginBottom: '5px'}}>FAILED</div>
+                      <div style={{fontSize: '20px', fontWeight: 'bold', color: '#e74c3c'}}>
+                        {autoEnrichStatus.total_failed}
+                      </div>
+                    </div>
+                    <div style={{padding: '15px', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #ddd'}}>
+                      <div style={{fontSize: '12px', color: '#666', marginBottom: '5px'}}>POSITION</div>
+                      <div style={{fontSize: '20px', fontWeight: 'bold', color: '#9b59b6'}}>
+                        {autoEnrichStatus.finanzen_offset}
+                      </div>
+                    </div>
+                    <div style={{padding: '15px', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #ddd'}}>
+                      <div style={{fontSize: '12px', color: '#666', marginBottom: '5px'}}>REMAINING</div>
+                      <div style={{fontSize: '20px', fontWeight: 'bold', color: '#f39c12'}}>
+                        ~{autoEnrichStatus.total_missing}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div style={{marginBottom: '20px'}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '5px', fontSize: '12px', color: '#666'}}>
+                      <span>Progress</span>
+                      <span>{autoEnrichStatus.progress_pct}%</span>
+                    </div>
+                    <div style={{height: '20px', backgroundColor: '#ecf0f1', borderRadius: '10px', overflow: 'hidden'}}>
+                      <div style={{
+                        height: '100%',
+                        width: `${autoEnrichStatus.progress_pct}%`,
+                        backgroundColor: '#3498db',
+                        transition: 'width 0.3s ease',
+                        borderRadius: '10px'
+                      }}></div>
+                    </div>
+                  </div>
+
+                  {/* Last Run Time */}
+                  {autoEnrichStatus.last_run && (
+                    <div style={{fontSize: '13px', color: '#666'}}>
+                      Last run: {new Date(autoEnrichStatus.last_run * 1000).toLocaleString()}
+                    </div>
+                  )}
+
+                  {/* Live Activity Feed */}
+                  {autoEnrichRunning && (
+                    <div style={{marginTop: '20px', padding: '20px', border: '1px solid #ddd', borderRadius: '8px', backgroundColor: '#fff'}}>
+                      <h3 style={{marginBottom: '15px', color: '#333', display: 'flex', alignItems: 'center', gap: '10px'}}>
+                        <span style={{
+                          display: 'inline-block',
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          backgroundColor: '#27ae60',
+                          animation: 'pulse 2s infinite'
+                        }}></span>
+                        Live Activity
+                      </h3>
+                      <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                        <div style={{padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '4px', borderLeft: '3px solid #3498db'}}>
+                          <div style={{fontSize: '13px', color: '#333', marginBottom: '3px'}}>
+                            <strong>Current Position:</strong> Processing from offset {autoEnrichStatus.finanzen_offset}
+                          </div>
+                          <div style={{fontSize: '12px', color: '#666'}}>
+                            Next batch: {autoEnrichStatus.finanzen_offset} to {autoEnrichStatus.finanzen_offset + 10}
+                          </div>
+                        </div>
+                        <div style={{padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '4px', borderLeft: '3px solid #27ae60'}}>
+                          <div style={{fontSize: '13px', color: '#333', marginBottom: '3px'}}>
+                            <strong>Session Stats:</strong> {autoEnrichStatus.total_enriched} enriched, {autoEnrichStatus.total_failed} failed
+                          </div>
+                          <div style={{fontSize: '12px', color: '#666'}}>
+                            Success rate: {autoEnrichStatus.total_enriched + autoEnrichStatus.total_failed > 0
+                              ? Math.round((autoEnrichStatus.total_enriched / (autoEnrichStatus.total_enriched + autoEnrichStatus.total_failed)) * 100)
+                              : 0}%
+                          </div>
+                        </div>
+                        <div style={{padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '4px', borderLeft: '3px solid #f39c12'}}>
+                          <div style={{fontSize: '13px', color: '#333', marginBottom: '3px'}}>
+                            <strong>Remaining:</strong> ~{autoEnrichStatus.total_missing} products to enrich
+                          </div>
+                          <div style={{fontSize: '12px', color: '#666'}}>
+                            Estimated cycles remaining: ~{Math.ceil(autoEnrichStatus.total_missing / 10)}
+                          </div>
+                        </div>
+                      </div>
+                      <style dangerouslySetInnerHTML={{__html: `
+                        @keyframes pulse {
+                          0%, 100% { opacity: 1; }
+                          50% { opacity: 0.5; }
+                        }
+                      `}} />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{padding: '20px', textAlign: 'center', color: '#999'}}>
+                  Loading status...
+                </div>
+              )}
+            </div>
+
+            {/* Progress by Source */}
+            {sourceProgress && sourceProgress.length > 0 && (
+              <div className="monitoring-section" style={{marginBottom: '30px', marginTop: '30px', padding: '20px', border: '1px solid #ddd', borderRadius: '8px', backgroundColor: '#fff'}}>
+                <h3 style={{marginBottom: '15px', color: '#333'}}>📊 Progress by Source</h3>
+                <div style={{display: 'flex', flexDirection: 'column', gap: '15px'}}>
+                  {sourceProgress.map(source => (
+                    <div key={source.source} style={{padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '4px'}}>
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px'}}>
+                        <div>
+                          <div style={{fontSize: '14px', fontWeight: 'bold', color: '#333'}}>
+                            {source.source === 'leonteq_api' ? '🔷 Leonteq API' :
+                             source.source === 'leonteq_html' ? '🔹 Leonteq HTML' :
+                             source.source === 'swissquote_html' ? '🟦 Swissquote' :
+                             source.source === 'akb_finanzportal' ? '🟨 AKB Finanzportal' :
+                             source.source}
+                          </div>
+                          <div style={{fontSize: '12px', color: '#666', marginTop: '3px'}}>
+                            {source.total.toLocaleString()} total products
+                          </div>
+                        </div>
+                        <div style={{textAlign: 'right'}}>
+                          <div style={{fontSize: '18px', fontWeight: 'bold', color: source.completion_pct > 50 ? '#27ae60' : source.completion_pct > 20 ? '#f39c12' : '#e74c3c'}}>
+                            {source.completion_pct}%
+                          </div>
+                          <div style={{fontSize: '11px', color: '#666'}}>
+                            complete
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{marginBottom: '8px'}}>
+                        <div style={{height: '8px', backgroundColor: '#ecf0f1', borderRadius: '4px', overflow: 'hidden'}}>
+                          <div style={{
+                            height: '100%',
+                            width: `${source.completion_pct}%`,
+                            backgroundColor: source.completion_pct > 50 ? '#27ae60' : source.completion_pct > 20 ? '#f39c12' : '#e74c3c',
+                            transition: 'width 0.3s ease',
+                            borderRadius: '4px'
+                          }}></div>
+                        </div>
+                      </div>
+                      <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '12px'}}>
+                        <div style={{color: '#27ae60'}}>
+                          ✅ {source.has_coupon.toLocaleString()} enriched
+                        </div>
+                        <div style={{color: '#e74c3c'}}>
+                          ❌ {source.missing_coupon.toLocaleString()} missing
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Quick Actions */}
+            <div style={{display: 'flex', gap: '10px', justifyContent: 'center'}}>
+              <button
+                onClick={() => setMainTab('settings')}
+                style={{padding: '10px 20px', fontSize: '14px'}}
+              >
+                ⚙️ Go to Settings
+              </button>
+            </div>
+          </div>
+        </div>
       ) : mainTab === 'settings' ? (
         <div className="settings-page">
           <div className="panel" style={{maxWidth: '800px', margin: '0 auto'}}>
@@ -1339,6 +1612,93 @@ function App() {
               )}
             </span>
           </div>
+
+          {/* ISIN Search Results */}
+          {searchResults && (
+            <div style={{
+              margin: '15px 0',
+              padding: '15px',
+              backgroundColor: searchResults.count > 0 ? '#e8f5e9' : '#fff3e0',
+              border: `1px solid ${searchResults.count > 0 ? '#4caf50' : '#ff9800'}`,
+              borderRadius: '8px'
+            }}>
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px'}}>
+                <h3 style={{margin: 0, fontSize: '16px', color: '#333'}}>
+                  🔍 Search Results for ISIN: {searchResults.isin}
+                </h3>
+                <button
+                  onClick={clearSearch}
+                  style={{
+                    padding: '5px 12px',
+                    fontSize: '13px',
+                    backgroundColor: '#f5f5f5',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              <div style={{fontSize: '14px', color: '#666', marginBottom: '10px'}}>
+                Found {searchResults.count} product{searchResults.count !== 1 ? 's' : ''}
+              </div>
+              {searchResults.count > 0 && (
+                <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                  {searchResults.products.map((product) => (
+                    <div
+                      key={product.id}
+                      onClick={() => loadDetail(product.id)}
+                      style={{
+                        padding: '12px',
+                        backgroundColor: '#fff',
+                        border: '1px solid #ddd',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)'}
+                      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                    >
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'start'}}>
+                        <div style={{flex: 1}}>
+                          <div style={{fontSize: '14px', fontWeight: 'bold', color: '#333', marginBottom: '4px'}}>
+                            {product.normalized_json?.product_name?.value || product.normalized_json?.product_type?.value || 'Unnamed Product'}
+                          </div>
+                          <div style={{fontSize: '12px', color: '#666', marginBottom: '4px'}}>
+                            <strong>ISIN:</strong> {product.isin} | <strong>Source:</strong> {getSourceName(product.source_kind)} {getSourceSymbol(product.source_kind)}
+                          </div>
+                          {product.normalized_json?.issuer_name?.value && (
+                            <div style={{fontSize: '12px', color: '#666', marginBottom: '4px'}}>
+                              <strong>Issuer:</strong> {product.normalized_json.issuer_name.value}
+                            </div>
+                          )}
+                          {product.normalized_json?.maturity_date?.value && (
+                            <div style={{fontSize: '12px', color: '#666'}}>
+                              <strong>Maturity:</strong> {product.normalized_json.maturity_date.value}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{textAlign: 'right', minWidth: '120px'}}>
+                          {product.normalized_json?.coupon_rate_pct_pa?.value && (
+                            <div style={{fontSize: '12px', color: '#27ae60', fontWeight: 'bold'}}>
+                              Coupon: {product.normalized_json.coupon_rate_pct_pa.value}% p.a.
+                            </div>
+                          )}
+                          {product.normalized_json?.underlyings && product.normalized_json.underlyings.length > 0 && (
+                            <div style={{fontSize: '11px', color: '#888', marginTop: '4px'}}>
+                              {product.normalized_json.underlyings.length} underlying{product.normalized_json.underlyings.length !== 1 ? 's' : ''}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="toggle-row">
             <button
               className={bestMode ? 'toggle active' : 'toggle'}

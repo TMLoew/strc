@@ -6,8 +6,10 @@ from backend.app.settings import settings
 
 def get_connection() -> sqlite3.Connection:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(settings.db_path)
+    conn = sqlite3.connect(settings.db_path, timeout=30.0)
     conn.row_factory = sqlite3.Row
+    # Enable WAL mode for better concurrency
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 

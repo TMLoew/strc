@@ -2,7 +2,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from backend.app.db.session import get_connection, init_db
+from backend.app.db.session import get_connection
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 

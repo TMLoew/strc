@@ -274,6 +274,46 @@ def add_by_isin(payload: ISINRequest) -> dict[str, str]:
     return {"id": product_id}
 
 
+@router.get("/search/isin/{isin}")
+def search_by_isin(isin: str) -> dict[str, Any]:
+    """
+    Search for products by ISIN in the database.
+
+    Args:
+        isin: ISIN code to search for (case-insensitive)
+
+    Returns:
+        List of matching products with full details
+    """
+    from backend.app.db.session import get_connection, init_db
+
+    init_db()
+    isin_upper = isin.strip().upper()
+
+    with get_connection() as conn:
+        rows = conn.execute("""
+            SELECT * FROM products
+            WHERE UPPER(isin) = ?
+            ORDER BY updated_at DESC
+            LIMIT 10
+        """, (isin_upper,)).fetchall()
+
+    products = []
+    for row in rows:
+        record = dict(row)
+        if record.get("normalized_json"):
+            record["normalized_json"] = json.loads(record["normalized_json"])
+        record["english_termsheet_url"] = _extract_english_termsheet(record.get("raw_text"))
+        record.pop("raw_text", None)
+        products.append(record)
+
+    return {
+        "isin": isin_upper,
+        "count": len(products),
+        "products": products
+    }
+
+
 @router.post("/search")
 def search_products(payload: SearchRequest) -> dict[str, list[str]]:
     query = payload.query.strip().upper()

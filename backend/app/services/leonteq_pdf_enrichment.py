@@ -15,7 +15,7 @@ from playwright.sync_api import sync_playwright, Page, Download
 
 from backend.app.db import models
 from backend.app.settings import settings
-from core.sources.leonteq import interactive_login_storage_state
+from backend.app.services.leonteq_session_service import get_leonteq_session_state
 from core.sources.pdf_termsheet import extract_text, parse_pdf
 
 # State file for tracking manual Leonteq enrichment progress
@@ -103,16 +103,18 @@ def download_termsheet_pdf_from_product_page(page: Page, isin: str) -> Path | No
             return None
 
         # Download PDF
+        logger.info(f"📄 ISIN {isin}: Found termsheet link, initiating download...")
         with page.expect_download(timeout=30000) as download_info:
             download_element.click()
 
         download: Download = download_info.value
+        suggested_filename = download.suggested_filename
 
         # Save to temporary file
         temp_pdf = Path(tempfile.mkdtemp()) / f"termsheet-{isin}.pdf"
         download.save_as(temp_pdf)
 
-        logger.info(f"ISIN {isin}: Downloaded PDF to {temp_pdf}")
+        logger.info(f"✓ ISIN {isin}: Downloaded PDF '{suggested_filename}' ({temp_pdf.stat().st_size / 1024:.1f} KB)")
         return temp_pdf
 
     except Exception as e:
@@ -256,7 +258,11 @@ def enrich_product_from_pdf(
             # Update database
             updated_json = json.dumps(existing_data)
             models.update_product_normalized_json(product_id, updated_json)
-            logger.info(f"Product {product_id} ({isin}): Enriched successfully with {sum(1 for f in fields_to_merge if f in pdf_data and pdf_data[f])} fields")
+
+            # Count enriched fields
+            enriched_fields = [f for f in fields_to_merge if f in pdf_data and pdf_data[f]]
+            logger.info(f"✓ Product {product_id} ({isin}): Enriched successfully with {len(enriched_fields)} fields from PDF")
+            logger.info(f"  📊 Fields added: {', '.join(enriched_fields[:5])}{' ...' if len(enriched_fields) > 5 else ''}")
             return True
         else:
             logger.debug(f"Product {product_id} ({isin}): No new data to add")
@@ -382,25 +388,20 @@ def enrich_leonteq_products_batch(
     if progress_callback:
         progress_callback(0, total, "Opening browser for Leonteq login...", stats)
 
-    # Get authenticated session (opens visible browser for manual login)
-    # This function manages its own browser instance
-    logger.info("Please log in to Leonteq in the browser window that will open...")
-    if progress_callback:
-        progress_callback(0, total, "⚠️ Please log in to Leonteq in the browser window...", stats)
-
-    try:
-        storage_state = interactive_login_storage_state()
-    except Exception as e:
-        logger.error(f"Login failed: {e}")
-        return stats
+    # Get authenticated session from in-memory storage
+    # Session must be created first via /ingest/leonteq/login endpoint
+    storage_state = get_leonteq_session_state()
 
     if not storage_state:
-        logger.error("Failed to get Leonteq authentication")
+        error_msg = "No Leonteq session found. Please log in first via Settings → 'Open Leonteq login'"
+        logger.error(error_msg)
+        if progress_callback:
+            progress_callback(0, total, f"❌ {error_msg}", stats)
         return stats
 
-    logger.info("Login successful, starting enrichment...")
+    logger.info("Using stored Leonteq session, starting enrichment...")
     if progress_callback:
-        progress_callback(0, total, "✓ Logged in successfully, starting enrichment...", stats)
+        progress_callback(0, total, "✓ Using stored session, starting enrichment...", stats)
 
     # Now launch headless browser with saved auth for enrichment
     with sync_playwright() as p:
